@@ -1,5 +1,9 @@
 The first step of this project is preprocess the dataset into igraph and csv format for later process. 
-If you download the total dataset from our github, you can start at 2 step. 
+In this stage, we use deepseek to hel[ us generate neural language relation in dataset, so if you want 
+to preprocess data , you need to modify the api-key in line 103 of preprocess.py, or you can start at 
+second stage by download the total file in data dir.
+
+For original WN18RR and FB15k237 datasets, we use files from [KG-BERT](https://github.com/yao8839836/kg-bert).
 
 1、data preprocess
 
