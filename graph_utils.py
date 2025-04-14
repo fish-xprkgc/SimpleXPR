@@ -4,6 +4,8 @@ from collections import defaultdict
 import os
 from pathlib import Path
 import pickle
+
+
 class GraphManager:
     def __init__(self):
         self.graph = ig.Graph(directed=True)
@@ -19,6 +21,7 @@ class GraphManager:
     def _inner_defaultdict_factory():
         """可序列化的嵌套字典工厂函数"""
         return defaultdict(set)
+
     '''
     def save_gml(self, filepath: str) -> None:
         """保存图结构到GML文件"""
@@ -58,6 +61,7 @@ class GraphManager:
             self._update_adjacency(src, dst, edge_name)
 
    '''
+
     def save_pickle(self, filepath: str) -> None:
         """
         安全存储整个GraphManager对象到pickle文件
@@ -195,7 +199,6 @@ class GraphManager:
                 visited_edges.remove(edge_signature)
                 current_path.pop()
 
-
     def update_node_description(self, customid: str, new_description: str) -> None:
         """修改指定节点的描述信息，其他属性保持不变"""
         if customid in self.node_id_map:
@@ -205,7 +208,10 @@ class GraphManager:
             # 更新igraph中的节点属性
             vid = self.node_id_map[customid]
             self.graph.vs[vid]["description"] = new_description
+
+
 _gm_instance = None
+
 
 def get_graph_manager(path: str = "") -> GraphManager:
     global _gm_instance

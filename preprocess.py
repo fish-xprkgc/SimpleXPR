@@ -7,7 +7,7 @@ import random
 import igraph as ig
 
 from graph_utils import get_graph_manager
-from utils import csv_to_column_dict
+from utils import csv_to_column_dict, _concat_name_desc
 
 parser = argparse.ArgumentParser(description='preprocess')
 parser.add_argument('--task', default='FB15k237', type=str, metavar='N',
@@ -63,10 +63,6 @@ def append_to_csv(file_path, new_row, delimiter=',', header=None):
             writer.writerow(header)
 
         writer.writerow(new_row)
-
-
-
-
 
 
 def generate_prompt(relation):
@@ -241,12 +237,6 @@ def process_relations_concurrent(rel_dict, relation_path, triple_rel_dict, num_t
 
     print("所有关系处理完成")
 
-def _concat_name_desc(entity: str, entity_desc: str) -> str:
-    if entity_desc.startswith(entity):
-        entity_desc = entity_desc[len(entity):].strip()
-    if entity_desc:
-        return '{}: {}'.format(entity, entity_desc)
-    return entity
 
 def process_wn18rr_entity(data_dir):
     ids = open(data_dir + 'entities.dict', 'r', encoding='utf-8').readlines()

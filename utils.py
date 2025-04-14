@@ -1,5 +1,6 @@
 import csv
 
+
 def csv_to_column_dict(file_path, delimiter=','):
     """
     读取 CSV 文件并转换为以第一列为键的字典结构
@@ -21,3 +22,11 @@ def csv_to_column_dict(file_path, delimiter=','):
             return result
     except:
         return {}
+
+
+def _concat_name_desc(entity: str, entity_desc: str) -> str:
+    if entity_desc.startswith(entity):
+        entity_desc = entity_desc[len(entity):].strip()
+    if entity_desc:
+        return '{}: {}'.format(entity, entity_desc)
+    return entity
