@@ -1,6 +1,6 @@
 from typing import List, Tuple, Dict, Set, DefaultDict
 import igraph as ig
-from collections import defaultdict
+from collections import defaultdict, deque
 import os
 from pathlib import Path
 import pickle
@@ -13,54 +13,14 @@ class GraphManager:
         # 核心存储结构
         self.node_id_map: Dict[str, int] = {}  # {customid: igraph顶点ID}
         self.node_info: Dict[str, Dict] = {}  # {customid: {name, description}}
-        self.edge_triples: Set[Tuple[str, str, str]] = set()
         self.adjacency = defaultdict(self._inner_defaultdict_factory)
         self.reverse_adjacency = defaultdict(self._inner_defaultdict_factory)
+        self.edge_list: List = []
 
     @staticmethod
     def _inner_defaultdict_factory():
         """可序列化的嵌套字典工厂函数"""
         return defaultdict(set)
-
-    '''
-    def save_gml(self, filepath: str) -> None:
-        """保存图结构到GML文件"""
-        self.graph.write_gml(filepath)
-
-    def load_gml(self, filepath: str) -> None:
-        """从GML文件加载并重建所有数据结构"""
-        self.graph = ig.Graph.Read_GML(filepath)
-        self._rebuild_data_structures()
-
-    def _rebuild_data_structures(self) -> None:
-        """统一重建所有数据存储结构"""
-        # 清空所有存储
-        self.node_id_map.clear()
-        self.node_info.clear()
-        self.edge_triples.clear()
-        self.adjacency.clear()
-        self.reverse_adjacency.clear()
-
-        # 重建节点信息
-        for v in self.graph.vs:
-            customid = v['customid']
-            self.node_id_map[customid] = v.index
-            self.node_info[customid] = {
-                'name': v['name'],
-                'description': v['description']
-            }
-
-        # 重建边信息
-        vid_to_custom = {v.index: v['customid'] for v in self.graph.vs}
-        for e in self.graph.es:
-            src = vid_to_custom[e.source]
-            dst = vid_to_custom[e.target]
-            edge_name = e['name']
-
-            self.edge_triples.add((src, edge_name, dst))
-            self._update_adjacency(src, dst, edge_name)
-
-   '''
 
     def save_pickle(self, filepath: str) -> None:
         """
@@ -116,17 +76,15 @@ class GraphManager:
         """添加边并维护所有相关结构"""
         if src_id in self.node_id_map and dst_id in self.node_id_map:
             triple = (src_id, edge_name, dst_id)
-            if triple not in self.edge_triples:
-                # 更新igraph
-                src_vid = self.node_id_map[src_id]
-                dst_vid = self.node_id_map[dst_id]
-                self.graph.add_edge(src_vid, dst_vid)
-                eid = self.graph.ecount() - 1
-                self.graph.es[eid]['name'] = edge_name
-
-                # 更新缓存
-                self.edge_triples.add(triple)
-                self._update_adjacency(src_id, dst_id, edge_name)
+            # 更新igraph
+            src_vid = self.node_id_map[src_id]
+            dst_vid = self.node_id_map[dst_id]
+            self.graph.add_edge(src_vid, dst_vid)
+            eid = self.graph.ecount() - 1
+            self.graph.es[eid]['name'] = edge_name
+            # 更新缓存
+            self.edge_list.append(triple)
+            self._update_adjacency(src_id, dst_id, edge_name)
 
     # 新增查询方法
     def get_node_info(self, customid: str) -> Dict[str, str]:
@@ -156,6 +114,29 @@ class GraphManager:
             paths=paths
         )
         return paths
+
+    def get_shortest_path(self, source_id: str, target_id: str, rel: str):
+        """基于igraph内置算法的高效实现"""
+        src_vid = self.node_id_map[source_id]
+        dst_vid = self.node_id_map[target_id]
+        # 使用OUT模式遵循有向边方向
+        paths = self.graph.get_shortest_paths(
+            src_vid, dst_vid, mode=ig.OUT, output="epath"
+        )
+        current_path = paths[0]
+        for edge in current_path:
+            print(edge)
+            print(self.edge_list[edge])
+        if not paths or not paths[0]:
+            return -1, []
+        current_path = paths[0]
+        current_path = [self.edge_list[edge] for edge in current_path]
+        if current_path[0][1] == rel and current_path[0][2] == target_id and len(current_path) == 1:
+            print(source_id)
+            print(target_id)
+            print(current_path)
+
+        return len(paths[0]) - 1, paths  # 节点数-1为边数
 
     def get_all_entities(self) -> List[str]:
         """获取所有节点的customid"""

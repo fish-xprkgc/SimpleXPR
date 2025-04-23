@@ -1,4 +1,5 @@
 import csv
+from graph_utils import get_graph_manager
 
 
 def csv_to_column_dict(file_path, delimiter=','):
@@ -30,3 +31,12 @@ def _concat_name_desc(entity: str, entity_desc: str) -> str:
     if entity_desc:
         return '{}: {}'.format(entity, entity_desc)
     return entity
+
+
+def get_entity_str(entity: str) -> str:
+    gm = get_graph_manager()
+    entity_info = gm.get_node_info(entity)
+    entity_name = entity_info['name']
+    entity_desc = entity_info['description']
+    entity_str = _concat_name_desc(entity_name, entity_desc)
+    return entity_str

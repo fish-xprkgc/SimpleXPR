@@ -2,6 +2,7 @@ from graph_utils import get_graph_manager
 from utils import csv_to_column_dict
 
 relation_dict = {}
+token_dict = {}
 
 
 def data_prepare(data_dir):
@@ -13,7 +14,13 @@ def data_prepare(data_dir):
         most_rel = rel[i]['most_relation'].split('\t')
         relation_dict[i] = most_rel[0]
         relation_dict[inverse + i] = most_rel[1]
+    path_generator(data_dir)
 
+def path_generator(data_dir):
+    pass
 
 def get_relation_dict():
     return relation_dict
+
+def get_token_dict():
+    return token_dict
