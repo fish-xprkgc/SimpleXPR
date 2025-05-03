@@ -16,6 +16,7 @@ class GraphManager:
         self.adjacency = defaultdict(self._inner_defaultdict_factory)
         self.reverse_adjacency = defaultdict(self._inner_defaultdict_factory)
         self.edge_list: List = []
+        self.triple_index = {}
 
     @staticmethod
     def _inner_defaultdict_factory():
@@ -116,27 +117,27 @@ class GraphManager:
         return paths
 
     def get_shortest_path(self, source_id: str, target_id: str, rel: str):
+        triple = (source_id, rel, target_id)
+        weights = [1] * self.graph.ecount()
+        try:
+            edge_index = self.triple_index[triple]
+            weights[edge_index] = float('inf')
+        except:
+            pass
         """基于igraph内置算法的高效实现"""
         src_vid = self.node_id_map[source_id]
         dst_vid = self.node_id_map[target_id]
         # 使用OUT模式遵循有向边方向
         paths = self.graph.get_shortest_paths(
-            src_vid, dst_vid, mode=ig.OUT, output="epath"
+            src_vid, dst_vid, weights=weights, mode=ig.OUT, output="epath"
         )
-        current_path = paths[0]
-        for edge in current_path:
-            print(edge)
-            print(self.edge_list[edge])
         if not paths or not paths[0]:
             return -1, []
         current_path = paths[0]
         current_path = [self.edge_list[edge] for edge in current_path]
-        if current_path[0][1] == rel and current_path[0][2] == target_id and len(current_path) == 1:
-            print(source_id)
-            print(target_id)
-            print(current_path)
-
-        return len(paths[0]) - 1, paths  # 节点数-1为边数
+        if current_path[0] == triple:
+            return -1, []
+        return len(current_path) - 1, current_path  # 节点数-1为边数
 
     def get_all_entities(self) -> List[str]:
         """获取所有节点的customid"""
@@ -196,9 +197,11 @@ _gm_instance = None
 
 def get_graph_manager(path: str = "") -> GraphManager:
     global _gm_instance
-    if _gm_instance is None:
-        if path and Path(path).exists():
-            _gm_instance = GraphManager.load_pickle(path)  # 优先加载pickle
-        else:
+    if path and Path(path).exists():
+        _gm_instance = GraphManager.load_pickle(path)  # 优先加载pickle
+        _gm_instance.triple_index = {triple: idx for idx, triple in enumerate(_gm_instance.edge_list)}
+    else:
+        if _gm_instance is None:
             _gm_instance = GraphManager()
+
     return _gm_instance
