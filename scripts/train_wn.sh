@@ -4,7 +4,9 @@ set -x
 set -e
 
 TASK="WN18RR"
-
+DATA_DIR="data/${TASK}/"
+CHECKPOINT_DIR="checkpoint/${TASK}_$(date +%F-%H%M.%S)"
+LOG_DIR=CHECKPOINT_DIR
 DIR="$( cd "$( dirname "$0" )" && cd .. && pwd )"
 echo "working directory: ${DIR}"
 
@@ -16,6 +18,9 @@ if [ -z "$DATA_DIR" ]; then
 fi
 
 python3 -u main.py \
+--task TASK \
+--data-dir DATA_DIR \
+--model-path /mnt/data/yhy/model/bert-base-uncased \
 --model-dir "${OUTPUT_DIR}" \
 --pretrained-model bert-base-uncased \
 --pooling mean \

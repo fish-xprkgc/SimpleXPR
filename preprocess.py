@@ -316,7 +316,7 @@ def process_path(gm, data_dir):
     paths = []
     with open(data_dir + 'train.txt', 'r') as f:
         lines = f.readlines()
-        num=0
+        num = 0
         for line in lines:
             triple = line.strip().split('\t')
             gm.get_node_info(triple[0])
@@ -331,9 +331,9 @@ def process_path(gm, data_dir):
                     current_path.append(triple[1])
                     current_path.append(triple[2])
                 current_path = '\t'.join(current_path)
-            num+=1
-            if num %1000==0:
-                print('processed '+ str(num)+' paths')
+            num += 1
+            if num % 1000 == 0:
+                print('processed ' + str(num) + ' paths')
             paths.append(current_path)
 
     with open(data_dir + 'paths.txt', 'w') as f:
