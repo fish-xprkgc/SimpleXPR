@@ -13,8 +13,12 @@ parser.add_argument('--use-llm-relation', action='store_true',
                     help='use large language relation description')
 parser.add_argument('--model-path', default="./model", type=str, metavar='N',
                     help='path to data dir')
+parser.add_argument('--max-hop-path', default=5, type=int, metavar='N',
+                    help='max hop paths')
 parser.add_argument('--log-dir', default="./log", type=str, metavar='N',)
 parser.add_argument('--save-dir', default="./checkpoint", type=str, metavar='N',)
+parser.add_argument('--batch-size', default=1024, type=int, metavar='N',)
+parser.add_argument('--seed', default=2025, type=int, metavar='N',)
 args = parser.parse_args()
 
 
