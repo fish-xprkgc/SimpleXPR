@@ -39,6 +39,7 @@ parser.add_argument('--use-amp', action='store_true',
                     help='Use amp if available')
 parser.add_argument('--grad-clip', default=10.0, type=float, metavar='N',
                     help='gradient clipping')
+parser.add_argument('--eval-model-path', default="./checkpoint/WN18RR/model_best.mdl", type=str, metavar='N',)
 
 args = parser.parse_args()
 random.seed(args.seed)
