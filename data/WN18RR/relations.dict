@@ -1,11 +1,3 @@
-0	_hypernym
-1	_derivationally_related_form
-2	_instance_hypernym
-3	_also_see
-4	_member_meronym
-5	_synset_domain_topic_of
-6	_has_part
-7	_member_of_domain_usage
-8	_member_of_domain_region
-9	_verb_group
-10	_similar_to
+version https://git-lfs.github.com/spec/v1
+oid sha256:3641206b594008501bfa573d48ccd5fba4fc0ab445d19d7d4482968f9239c2f8
+size 225

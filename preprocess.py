@@ -312,9 +312,9 @@ def process_fb15_entity(data_dir):
     return gm
 
 
-def process_path(gm, data_dir):
+def process_path(gm, data_dir, file_name,path_name):
     paths = []
-    with open(data_dir + 'train.txt', 'r') as f:
+    with open(data_dir + file_name, 'r') as f:
         lines = f.readlines()
         num = 0
         for line in lines:
@@ -331,12 +331,25 @@ def process_path(gm, data_dir):
                     current_path.append(triple[1])
                     current_path.append(triple[2])
                 current_path = '\t'.join(current_path)
+
+            paths.append(current_path)
+            triple = line.strip().split('\t')
+            x, path = gm.get_shortest_path(triple[2], triple[0],'inverse_relation_'+triple[1])
+            if x == -1 or x > args.max_hop_path:
+                current_path = '\t'.join(['inverse_relation_'+triple[1], triple[2], 'inverse_relation_'+triple[1], triple[0]])
+            else:
+                current_path = ['inverse_relation_'+triple[1], triple[2]]
+                for triple in path:
+                    current_path.append(triple[1])
+                    current_path.append(triple[2])
+                current_path = '\t'.join(current_path)
+
+            paths.append(current_path)
             num += 1
             if num % 1000 == 0:
                 print('processed ' + str(num) + ' paths')
-            paths.append(current_path)
 
-    with open(data_dir + 'paths.txt', 'w') as f:
+    with open(data_dir + path_name, 'w') as f:
         for path in paths:
             f.write(path + '\n')
 
@@ -352,8 +365,8 @@ def main():
         process_data(graph, data_dir + 'train.txt')
 
     gm = get_graph_manager(data_dir + 'igraph.pkl')
-    process_path(gm, data_dir)
-
+    process_path(gm, data_dir,'train.txt','train_path.txt')
+    process_path(gm, data_dir,'valid.txt','valid_path.txt')
 
 if __name__ == '__main__':
     main()

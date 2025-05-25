@@ -6,36 +6,19 @@ set -e
 TASK="WN18RR"
 DATA_DIR="data/${TASK}/"
 CHECKPOINT_DIR="checkpoint/${TASK}_$(date +%F-%H%M.%S)"
-LOG_DIR=CHECKPOINT_DIR
-DIR="$( cd "$( dirname "$0" )" && cd .. && pwd )"
-echo "working directory: ${DIR}"
+LOG_DIR=${CHECKPOINT_DIR}
 
-if [ -z "$OUTPUT_DIR" ]; then
-  OUTPUT_DIR="${DIR}/checkpoint/${TASK}_$(date +%F-%H%M.%S)"
-fi
-if [ -z "$DATA_DIR" ]; then
-  DATA_DIR="${DIR}/data/${TASK}"
-fi
-
-python3 -u main.py \
---task TASK \
---data-dir DATA_DIR \
---model-path /mnt/data/yhy/model/bert-base-uncased \
---model-dir "${OUTPUT_DIR}" \
---pretrained-model bert-base-uncased \
+python3 -u trainer.py \
+--task ${TASK} \
+--data-dir "${DATA_DIR}" \
+--model-path /mnt/data/sushiyuan/SimKGC/yhy/model/bert-base-uncased \
+--save-dir "${CHECKPOINT_DIR}" \
+--log-dir "${LOG_DIR}" \
+--model-path bert-base-uncased \
 --pooling mean \
 --lr 5e-5 \
---use-link-graph \
---train-path "${DATA_DIR}/train.txt.json" \
---valid-path "${DATA_DIR}/valid.txt.json" \
---task ${TASK} \
---batch-size 1024 \
---print-freq 20 \
---additive-margin 0.02 \
+--batch-size 1000 \
+--print-freq 1 \
 --use-amp \
---use-self-negative \
---pre-batch 0 \
---finetune-t \
 --epochs 50 \
---workers 4 \
 --max-to-keep 3 "$@"

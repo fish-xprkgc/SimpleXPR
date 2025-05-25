@@ -1,21 +1,24 @@
 import time
 
-from torch import nn
+from torch import nn, Tensor
 from torch.nn.utils.rnn import pad_sequence
 from graph_utils import get_graph_manager
 from utils import csv_to_column_dict, _concat_name_desc
 from config import args
 import torch
 from transformers import BatchEncoding, AutoTokenizer
-from typing import List
+from typing import List, Dict, Any
+import numpy as np
+from collections import defaultdict
+
 
 relation_dict = {}
 token_dict = {}
-total_path = []
+path_dict={}
 
 
 def data_prepare(data_dir, max_hop_path=5):
-    global relation_dict
+    global relation_dict,path_dict
     gm = get_graph_manager(data_dir + 'igraph.pkl')
     rel = csv_to_column_dict(data_dir + 'relations.csv')
     inverse = 'inverse_relation_'
@@ -41,21 +44,15 @@ def data_prepare(data_dir, max_hop_path=5):
         node_str = _concat_name_desc(node_info['name'], node_info['description'])
         token_dict[node_id] = tokenizer(node_str, padding=True, return_tensors='pt', truncation=True, max_length=50)
 
-    path_generator(data_dir, max_hop_path)
+    path_dict['train']=path_generator(data_dir, 'train_path.txt',max_hop_path)
+    path_dict['valid'] = path_generator(data_dir, 'valid_path.txt', max_hop_path)
 
 
-def path_generator(data_dir, max_hop_path):
-    global total_path
+def path_generator(data_dir,path_name, max_hop_path):
     total_path = [[] for i in range(max_hop_path + 3)]
-    num = 0
-    start_time = time.time()
-    with open(data_dir + 'sample_paths.txt', 'r') as f:
+    with open(data_dir + path_name, 'r') as f:
         lines = f.readlines()
         for line in lines:
-            num += 1
-            if num % 1000 == 0:
-                print(num / 1000)
-                print(time.time() - start_time)
             line = line.strip().split('\t')
             hop_nums = int(len(line) / 2 - 1)
             if line[0] != line[2] and hop_nums == 1:
@@ -77,7 +74,7 @@ def path_generator(data_dir, max_hop_path):
                 total_path[2].append(line)
             else:
                 total_path[hop_nums+1].append(line)
-
+    return total_path
 def process_path(path_arr, query_hop=1):
     path_arr = [token_dict[i] for i in path_arr]
     path_head = path_arr[0:query_hop * 2]
@@ -93,9 +90,9 @@ def process_path(path_arr, query_hop=1):
     return head, tail
 
 
-def merge_path(batches: List[BatchEncoding]) -> BatchEncoding:
+def merge_path(batches: List[dict[Any, Tensor]]) -> dict[Any, Tensor]:
     if not batches:
-        return BatchEncoding({})
+        return {}
     # 检查字段一致性
     keys = batches[0].keys()
     for batch in batches[1:]:
@@ -127,7 +124,7 @@ def merge_path(batches: List[BatchEncoding]) -> BatchEncoding:
         # 核心修改：沿序列维度拼接（dim=1）
         merged[key] = torch.cat(combined_sequence, dim=1)  # 结果形状 [1, total_sliced_len]
 
-    return BatchEncoding(merged)
+    return merged
 
 
 def merge_batches(batches):
@@ -163,11 +160,47 @@ def merge_batches(batches):
     return BatchEncoding(merged)
 
 
+def create_matrix_optimized(paths, k):
+    k = max(k, 1)
+    n = len(paths)
+
+    # Step 1: 构建 lst
+    lst = []
+    target_len = 2 * k
+    for path in paths:
+        if len(path) == target_len:
+            lst.append('eos')
+        else:
+            lst.append(path[2*k] + path[2*k + 1])
+
+    # Step 2: 构建 value -> indices 映射
+
+    value_to_indices = defaultdict(list)
+    for idx, val in enumerate(lst):
+        value_to_indices[val].append(idx)
+
+    # Step 3: 初始化矩阵
+    matrix = np.ones((n, n), dtype=int)
+
+    # Step 4: 批量设置匹配项为 0
+    for indices in value_to_indices.values():
+        if len(indices) > 1:
+            matrix[np.ix_(indices, indices)] = 0
+
+    # Step 5: 设置对角线为 1
+    np.fill_diagonal(matrix, 1)
 
 
-def get_total_path():
-    return total_path
 
+    return torch.tensor(matrix, dtype=torch.bool)
+
+
+def get_train_path():
+    return path_dict['train']
+
+
+def get_valid_path():
+    return path_dict['valid']
 
 def get_relation_dict():
     return relation_dict
