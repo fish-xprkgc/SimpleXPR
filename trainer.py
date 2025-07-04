@@ -9,15 +9,16 @@ import torch.optim as optim
 from logger_config import logger
 from metric import accuracy
 from models import *
-from data_dict import get_train_path, data_prepare, get_valid_path
+from data_dict import get_train_path, data_prepare, get_valid_path, path_prepare
 from config import args
 from data_dict import merge_path, merge_batches, process_path, create_matrix_optimized
 from utils import move_dict_cuda, AverageMeter, ProgressMeter, save_checkpoint, delete_old_ckt
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 import os
-
+batch_sizes={}
 def train_dp(max_hop_path: int, num_epochs=3):
     # 1. 准备数据
+    global batch_sizes
     train_path = get_train_path()
     train_dataset = KHopDataset(train_path, max_hop_path)
     valid_path = get_valid_path()
@@ -83,13 +84,21 @@ def train_dp(max_hop_path: int, num_epochs=3):
             if batch == None:
                 continue
             batch_size=len(batch['paths'])
-            logits, labels = get_logits_labels(batch, model, model_obj, device)
-            loss = criterion(logits, labels)
+            if args.use_amp:
+                with torch.cuda.amp.autocast():
+                    logits, labels = get_logits_labels(batch, model, model_obj, device)
+                    loss = criterion(logits, labels)
+            else:
+                logits, labels = get_logits_labels(batch, model, model_obj, device)
+                loss = criterion(logits, labels)
             losses.update(loss.item(), logits.size(0))
-            acc1, acc3, acc10 = accuracy(logits, labels, topk=(1, 3, 10))
-            top1.update(acc1.item(), batch_size)
-            top3.update(acc3.item(), batch_size)
-            top10.update(acc10.item(), batch_size)
+            if batch_size!=batch_sizes[batch['k']]:
+                pass
+            else:
+                acc1, acc3, acc10 = accuracy(logits, labels, topk=(1, 3, 10))
+                top1.update(acc1.item(), batch_size)
+                top3.update(acc3.item(), batch_size)
+                top10.update(acc10.item(), batch_size)
             optimizer.zero_grad()
             if args.use_amp:
                 scaler.scale(loss).backward()
@@ -120,10 +129,14 @@ def do_eval(model, valid_dataloader,model_obj,device,epoch):
         batch_size = len(batch['paths'])
         with torch.no_grad():
             logits, labels = get_logits_labels(batch, model, model_obj, device)
-            acc1, acc3, acc10 = accuracy(logits, labels, topk=(1, 3, 10))
-            top1.update(acc1.item(), batch_size)
-            top3.update(acc3.item(), batch_size)
-            top10.update(acc10.item(), batch_size)
+            if batch_size!=batch_sizes[batch['k']]:
+
+                pass
+            else:
+                acc1, acc3, acc10 = accuracy(logits, labels, topk=(1, 3, 10))
+                top1.update(acc1.item(), batch_size)
+                top3.update(acc3.item(), batch_size)
+                top10.update(acc10.item(), batch_size)
 
     metric_dict = {'Acc@1': round(top1.avg, 3),
                    'Acc@3': round(top3.avg, 3),
@@ -186,5 +199,7 @@ if __name__ == "__main__":
 
 
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    data_prepare(args.data_dir, args.max_hop_path)
+    data_prepare(args.data_dir)
+    path_prepare(args.data_dir, args.max_hop_path)
+    logger.info('当前随机种子为'+str(args.seed))
     train_dp(args.max_hop_path, args.epochs)

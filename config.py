@@ -1,6 +1,23 @@
 import argparse
 import random
+
+import numpy as np
+import torch
+
 from graph_utils import get_graph_manager
+def set_seed(seed):
+    # 设置 Python 内置的 random
+    random.seed(seed)
+
+    # 设置 NumPy
+    np.random.seed(seed)
+
+    # 设置 PyTorch CPU 和 GPU
+    torch.manual_seed(seed)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)  # 当前 GPU
+        torch.cuda.manual_seed_all(seed)  # 所有 GPU（用于多卡）
 
 parser = argparse.ArgumentParser(description='config arguments')
 parser.add_argument('--task', default='WN18RR', type=str, metavar='N',
@@ -18,7 +35,7 @@ parser.add_argument('--max-hop-path', default=5, type=int, metavar='N',
 parser.add_argument('--log-dir', default="./log", type=str, metavar='N',)
 parser.add_argument('--save-dir', default="./checkpoint", type=str, metavar='N',)
 parser.add_argument('--batch-size', default=1024, type=int, metavar='N',)
-parser.add_argument('--seed', default=2025, type=int, metavar='N',)
+parser.add_argument('--seed', default=42, type=int, metavar='N',)
 parser.add_argument('--pooling', default="mean", type=str, metavar='N',)
 parser.add_argument('--lr', '--learning-rate', default=5e-5, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
@@ -40,9 +57,15 @@ parser.add_argument('--use-amp', action='store_true',
 parser.add_argument('--grad-clip', default=10.0, type=float, metavar='N',
                     help='gradient clipping')
 parser.add_argument('--eval-model-path', default="./checkpoint/WN18RR/model_best.mdl", type=str, metavar='N',)
-
+parser.add_argument('--ema-decay', default=0.5, type=float, metavar='N',
+                    help='ema')
+parser.add_argument('--k-path', default=10, type=int,
+                    metavar='N', help='how many paths will be restored(at least 10)')
+parser.add_argument('--eval-mode', default=1, type=int,
+                    metavar='N', help='there are some evaluation modes,1 or 2')
 args = parser.parse_args()
-random.seed(args.seed)
+set_seed(args.seed)
+
 
 def get_args():
 

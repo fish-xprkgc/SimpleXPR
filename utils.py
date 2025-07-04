@@ -1,8 +1,10 @@
 import csv
 import glob
 import os
+import random
 import shutil
 
+import numpy as np
 import torch
 
 from graph_utils import get_graph_manager
@@ -106,3 +108,4 @@ class ProgressMeter(object):
         num_digits = len(str(num_batches // 1))
         fmt = '{:' + str(num_digits) + 'd}'
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+

@@ -11,7 +11,6 @@ import time
 from transformers import AutoModel
 
 from config import args
-from data_dict import data_prepare
 from numpy.random import Generator, PCG64
 
 
@@ -24,19 +23,21 @@ class PathModel(nn.Module):
         super(PathModel, self).__init__()
         self.path_model = AutoModel.from_pretrained(model_name)
         self.criterion = nn.CrossEntropyLoss()
-    def forward(self, input_ids, attention_mask,token_type_ids):
+
+    def forward(self, input_ids, attention_mask, token_type_ids):
         # paths: 批量的路径索引
         # lengths: 每条路径的实际长度（用于pack_padded_sequence）
         outputs = self.path_model(input_ids=input_ids,
-                          attention_mask=attention_mask,
-                          token_type_ids=token_type_ids,
-                          return_dict=True)
+                                  attention_mask=attention_mask,
+                                  token_type_ids=token_type_ids,
+                                  return_dict=True)
 
         last_hidden_state = outputs.last_hidden_state
         cls_output = last_hidden_state[:, 0, :]
         cls_output = _pool_output(args.pooling, cls_output, attention_mask, last_hidden_state)
         return cls_output
-    def compute_logits(self,path_tensor,tail_tensor,mask):
+
+    def compute_logits(self, path_tensor, tail_tensor, mask):
         logits = path_tensor.mm(tail_tensor.t())
         '''
         if self.training:
@@ -46,8 +47,47 @@ class PathModel(nn.Module):
         '''
         logits *= 20
         logits.masked_fill_(~mask, -1e4)
-        labels=torch.arange(path_tensor.size(0)).to(logits.device)
-        return logits,labels
+        labels = torch.arange(path_tensor.size(0)).to(logits.device)
+        return logits, labels
+
+    @classmethod
+    def load_from_checkpoint(cls, checkpoint_path, model_name, map_location=None):
+        """
+        加载模型权重，兼容普通模型和DataParallel模型
+
+        参数:
+            checkpoint_path (str): 权重文件路径
+            model_name (str): 传给AutoModel.from_pretrained的模型名称或路径
+            map_location (str or dict): 设备映射策略（如 'cpu'）
+
+        返回:
+            PathModel 实例
+        """
+        if map_location is None:
+            map_location = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        # 实例化模型
+        model = cls(model_name=model_name)
+
+        # 加载检查点
+        checkpoint = torch.load(checkpoint_path, map_location=map_location)
+
+        # 提取 state_dict
+        state_dict = checkpoint.get('state_dict', checkpoint)  # 如果 checkpoint 中有 'state_dict' 就用它，否则整个就是 state_dict
+
+        # 处理 DataParallel 前缀
+        new_state_dict = {}
+        for key, value in state_dict.items():
+            if key.startswith('module.'):
+                new_key = key.replace('module.', '')  # 去掉 module. 前缀
+            else:
+                new_key = key
+            new_state_dict[new_key] = value
+
+        # 加载权重（注意：这里只加载模型权重）
+        model.load_state_dict(new_state_dict, strict=True)
+        return model
+
 
 class KHopDataset(Dataset):
     def __init__(self, total_path: List[List[List[str]]], max_hop_path: int):
@@ -67,7 +107,6 @@ class KHopDataset(Dataset):
         for k, paths in self.data_by_k.items():
             self.flat_data.extend(paths)
             self.flat_k.extend([k] * len(paths))
-
         # 原始统计信息（采样器需要）
         self.k_counts = {k: len(items) for k, items in self.data_by_k.items()}
         total = sum(self.k_counts.values())
@@ -117,11 +156,16 @@ class KHopBatchSampler(Sampler):
             k: set(range(count))  # 改成 set！
             for k, count in dataset.k_counts.items()
         }
-
+        self.offset_map = {}
+        current_offset = 0
+        for k, count in dataset.k_counts.items():
+            self.offset_map[k] = current_offset
+            current_offset += count
         # 记录各跳数剩余数据量
         self.remaining_counts = dataset.k_counts.copy()
 
         # 使用方式
+
     @property
     def available_ks(self):
         return [k for k in self.remaining_counts if self.remaining_counts[k] > 0]
@@ -163,8 +207,9 @@ class KHopBatchSampler(Sampler):
             self.dataset.update_sampling_probs(
                 {k: len(v) for k, v in self.available_indices.items()}
             )
+            global_indices = [self.offset_map[chosen_k] + idx for idx in indices]
+            yield global_indices
 
-            yield indices
     def __len__(self):
         total_batches = 0
         for k, count in self.dataset.k_counts.items():
@@ -173,6 +218,7 @@ class KHopBatchSampler(Sampler):
             if not self.drop_last and count % bs != 0:
                 total_batches += 1
         return total_batches
+
 
 def collate_fn(batch_data: List[Dict[str, Any]]):
     """

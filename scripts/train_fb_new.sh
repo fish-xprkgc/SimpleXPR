@@ -3,7 +3,7 @@
 set -x
 set -e
 
-TASK="WN18RR"
+TASK="FB15k237"
 DATA_DIR="data/${TASK}/"
 CHECKPOINT_DIR="checkpoint/${TASK}_new"
 LOG_DIR=${CHECKPOINT_DIR}
@@ -17,9 +17,8 @@ python3 -u trainer.py \
 --model-path bert-base-uncased \
 --pooling mean \
 --lr 5e-5 \
---batch-size 1024 \
+--batch-size 800 \
 --print-freq 50 \
 --use-amp \
 --epochs 20 \
---seed 42 \
 --max-to-keep 1 "$@"

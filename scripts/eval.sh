@@ -19,4 +19,8 @@ python3 -u evaluate.py \
 --task "${TASK}" \
 --data-dir "./data/${TASK}/" \
 --eval-model-path "${checkpoint_path}" \
+--batch-size 20480 \
+--k-path 10 \
+--eval-mode 2 \
+--model-path /mnt/data/sushiyuan/SimKGC/yhy/model/bert-base-uncased "$@"
 

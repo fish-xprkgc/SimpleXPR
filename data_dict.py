@@ -11,14 +11,15 @@ from typing import List, Dict, Any
 import numpy as np
 from collections import defaultdict
 
-
 relation_dict = {}
 token_dict = {}
-path_dict={}
+path_dict = {}
+next_dict = defaultdict(lambda: defaultdict(set))
+combined_dict = {}
 
 
-def data_prepare(data_dir, max_hop_path=5):
-    global relation_dict,path_dict
+def data_prepare(data_dir):
+    global relation_dict
     gm = get_graph_manager(data_dir + 'igraph.pkl')
     rel = csv_to_column_dict(data_dir + 'relations.csv')
     inverse = 'inverse_relation_'
@@ -44,11 +45,14 @@ def data_prepare(data_dir, max_hop_path=5):
         node_str = _concat_name_desc(node_info['name'], node_info['description'])
         token_dict[node_id] = tokenizer(node_str, padding=True, return_tensors='pt', truncation=True, max_length=50)
 
-    path_dict['train']=path_generator(data_dir, 'train_path.txt',max_hop_path)
+
+def path_prepare(data_dir, max_hop_path=5):
+    global path_dict
+    path_dict['train'] = path_generator(data_dir, 'train_path.txt', max_hop_path)
     path_dict['valid'] = path_generator(data_dir, 'valid_path.txt', max_hop_path)
 
 
-def path_generator(data_dir,path_name, max_hop_path):
+def path_generator(data_dir, path_name, max_hop_path):
     total_path = [[] for i in range(max_hop_path + 3)]
     with open(data_dir + path_name, 'r') as f:
         lines = f.readlines()
@@ -73,8 +77,10 @@ def path_generator(data_dir,path_name, max_hop_path):
             if hop_nums == 0:
                 total_path[2].append(line)
             else:
-                total_path[hop_nums+1].append(line)
+                total_path[hop_nums + 1].append(line)
     return total_path
+
+
 def process_path(path_arr, query_hop=1):
     path_arr = [token_dict[i] for i in path_arr]
     path_head = path_arr[0:query_hop * 2]
@@ -83,6 +89,8 @@ def process_path(path_arr, query_hop=1):
     else:
         path_tail = [token_dict['connect_flag'], path_arr[query_hop * 2], token_dict['connect_flag'],
                      path_arr[query_hop * 2 + 1]]
+    if query_hop == 0:
+        return None, merge_path(path_tail)
     query = [token_dict['query_flag'], path_head[0], token_dict['path_flag']]
     for i in range(1, query_hop * 2):
         query.append(path_head[i])
@@ -171,7 +179,7 @@ def create_matrix_optimized(paths, k):
         if len(path) == target_len:
             lst.append('eos')
         else:
-            lst.append(path[2*k] + path[2*k + 1])
+            lst.append(path[2 * k] + path[2 * k + 1])
 
     # Step 2: 构建 value -> indices 映射
 
@@ -190,9 +198,71 @@ def create_matrix_optimized(paths, k):
     # Step 5: 设置对角线为 1
     np.fill_diagonal(matrix, 1)
 
-
-
     return torch.tensor(matrix, dtype=torch.bool)
+
+
+def create_node_mask(node_id):
+    return None
+
+
+def construct_next_dict(data_dir):
+    with open(data_dir + 'train.txt', 'r') as f:
+        for line in f:
+            process_line_dict(line,flag='train')
+    with open(data_dir + 'valid.txt', 'r') as f:
+        for line in f:
+            process_line_dict(line,flag='valid')
+    with open(data_dir + 'test.txt', 'r') as f:
+        for line in f:
+            process_line_dict(line,flag='test')
+    return next_dict
+
+
+def process_line_dict(line,flag='train'):
+    global next_dict
+    line = line.strip().split('\t')
+    if len(line) < 3:
+        return None
+
+    h, r, t = line
+
+    # 正向关系
+    next_dict[flag][h].add(f"{r}[SEP]{t}")
+    next_dict[flag][f"{r}[SEP]{h}"].add(t)
+
+    # 反向关系
+    inv_rel = f"inverse_relation_{r}"
+    next_dict[flag][t].add(f"{inv_rel}[SEP]{h}")
+    next_dict[flag][f"{inv_rel}[SEP]{t}"].add(h)
+
+
+def merge_flag_parts(next_str_dict, flags=None):
+    if flags is None:
+        flags = ['train', 'valid', 'test']
+    merged = defaultdict(set)
+    for flag in flags:
+        if flag in next_str_dict:
+            for key, value_set in next_str_dict[flag].items():
+                merged[key] |= value_set
+    return merged
+
+
+def combined_rel_entity(next_str_dict):
+    total_hr = set()
+    global combined_dict
+    for key, value in next_str_dict.items():
+        if '[SEP]' not in key:
+            total_hr.update(value)
+
+    for i in total_hr:
+        x, path = process_path(i.split('[SEP]'), query_hop=0)
+        combined_dict[i] = path
+    x, combined_dict['[END]'] = process_path([], query_hop=0)
+    return total_hr
+
+
+def get_combined_dict():
+    return combined_dict
 
 
 def get_train_path():
@@ -202,10 +272,10 @@ def get_train_path():
 def get_valid_path():
     return path_dict['valid']
 
+
 def get_relation_dict():
     return relation_dict
 
 
 def get_token_dict():
     return token_dict
-
