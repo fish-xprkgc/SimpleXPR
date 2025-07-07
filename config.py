@@ -63,6 +63,8 @@ parser.add_argument('--k-path', default=10, type=int,
                     metavar='N', help='how many paths will be restored(at least 10)')
 parser.add_argument('--eval-mode', default=1, type=int,
                     metavar='N', help='there are some evaluation modes,1 or 2')
+parser.add_argument('--only-tail', action='store_true',
+                    help='only maintain tail entity of path')
 args = parser.parse_args()
 set_seed(args.seed)
 

@@ -15,7 +15,10 @@ from data_dict import merge_path, merge_batches, process_path, create_matrix_opt
 from utils import move_dict_cuda, AverageMeter, ProgressMeter, save_checkpoint, delete_old_ckt
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 import os
-batch_sizes={}
+
+batch_sizes = {}
+
+
 def train_dp(max_hop_path: int, num_epochs=3):
     # 1. 准备数据
     global batch_sizes
@@ -59,11 +62,9 @@ def train_dp(max_hop_path: int, num_epochs=3):
                       weight_decay=args.weight_decay)
     criterion = nn.CrossEntropyLoss().cuda()
 
-
-
     num_training_steps = args.epochs * len(train_sampler)
     print(num_training_steps)
-    scheduler = _create_lr_scheduler(optimizer,num_training_steps)
+    scheduler = _create_lr_scheduler(optimizer, num_training_steps)
     args.warmup = min(args.warmup, num_training_steps // 10)
     print(args.warmup)
     if args.use_amp:
@@ -80,10 +81,10 @@ def train_dp(max_hop_path: int, num_epochs=3):
             prefix="Epoch: [{}]".format(epoch))
         model.train()
 
-        for i,batch in enumerate(train_dataloader):
+        for i, batch in enumerate(train_dataloader):
             if batch == None:
                 continue
-            batch_size=len(batch['paths'])
+            batch_size = len(batch['paths'])
             if args.use_amp:
                 with torch.cuda.amp.autocast():
                     logits, labels = get_logits_labels(batch, model, model_obj, device)
@@ -92,7 +93,7 @@ def train_dp(max_hop_path: int, num_epochs=3):
                 logits, labels = get_logits_labels(batch, model, model_obj, device)
                 loss = criterion(logits, labels)
             losses.update(loss.item(), logits.size(0))
-            if batch_size!=batch_sizes[batch['k']]:
+            if batch_size != batch_sizes[batch['k']]:
                 pass
             else:
                 acc1, acc3, acc10 = accuracy(logits, labels, topk=(1, 3, 10))
@@ -115,21 +116,25 @@ def train_dp(max_hop_path: int, num_epochs=3):
                 progress.display(i)
         logger.info('Learning rate: {}'.format(scheduler.get_last_lr()[0]))
 
-        do_eval(model, valid_dataloader,model_obj, device,epoch)
+        do_eval(model, valid_dataloader, model_obj, device, epoch)
 
     print("Training completed!")
-best_metric=None
-def do_eval(model, valid_dataloader,model_obj,device,epoch):
+
+
+best_metric = None
+
+
+def do_eval(model, valid_dataloader, model_obj, device, epoch):
     global best_metric
     model.eval()
     top1 = AverageMeter('Acc@1', ':6.2f')
     top3 = AverageMeter('Acc@3', ':6.2f')
     top10 = AverageMeter('Acc@10', ':6.2f')
-    for i,batch in enumerate(valid_dataloader):
+    for i, batch in enumerate(valid_dataloader):
         batch_size = len(batch['paths'])
         with torch.no_grad():
             logits, labels = get_logits_labels(batch, model, model_obj, device)
-            if batch_size!=batch_sizes[batch['k']]:
+            if batch_size != batch_sizes[batch['k']]:
 
                 pass
             else:
@@ -143,15 +148,15 @@ def do_eval(model, valid_dataloader,model_obj,device,epoch):
                    'Acc@10': round(top10.avg, 3),
                    }
     logger.info('Epoch {}, valid metric: {}'.format(epoch, json.dumps(metric_dict)))
-    if epoch==0:
-        best_metric=metric_dict
+    if epoch == 0:
+        best_metric = metric_dict
         is_best = True
     else:
         is_best = metric_dict['Acc@1'] > best_metric['Acc@1']
         if is_best:
             best_metric = metric_dict
 
-    filename = '{}/checkpoint_{}_{}.mdl'.format(args.save_dir,args.task, epoch)
+    filename = '{}/checkpoint_{}_{}.mdl'.format(args.save_dir, args.task, epoch)
 
     save_checkpoint({
         'epoch': epoch,
@@ -160,15 +165,19 @@ def do_eval(model, valid_dataloader,model_obj,device,epoch):
     }, is_best=is_best, filename=filename)
     delete_old_ckt(path_pattern='{}/checkpoint_*.mdl'.format(args.save_dir),
                    keep=args.max_to_keep)
+
+
 def get_logits_labels(batch, model, model_obj, device):
     # 7. 准备输入数据
     paths = batch["paths"]  # 这里需要将文本路径转换为索引
     k = batch["k"]
     query, tail = [], []
+    task_type = 'task_type_path'
     if k == 0:
         k = 1
+        task_type = 'task_type_hr'
     for path in paths:
-        q, t = process_path(path, k)
+        q, t = process_path(path, k,task_type)
         query.append(q)
         tail.append(t)
     query_tensor = merge_batches(query)
@@ -182,6 +191,8 @@ def get_logits_labels(batch, model, model_obj, device):
     mask = create_matrix_optimized(paths, k).to(device)
     logits, labels = model_obj.compute_logits(query_embedding, tail_embedding, mask)
     return logits, labels
+
+
 def _create_lr_scheduler(optimizer, num_training_steps):
     if args.lr_scheduler == 'linear':
         return get_linear_schedule_with_warmup(optimizer=optimizer,
@@ -196,10 +207,8 @@ def _create_lr_scheduler(optimizer, num_training_steps):
 
 
 if __name__ == "__main__":
-
-
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     data_prepare(args.data_dir)
     path_prepare(args.data_dir, args.max_hop_path)
-    logger.info('当前随机种子为'+str(args.seed))
+    logger.info('当前随机种子为' + str(args.seed))
     train_dp(args.max_hop_path, args.epochs)

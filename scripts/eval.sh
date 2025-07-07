@@ -3,7 +3,7 @@
 set -x
 set -e
 
-checkpoint_path="./checkpoint/WN18RR/model_best.mdl"
+checkpoint_path="./checkpoint/WN18RR_new_task_extra/model_last.mdl"
 TASK="WN18RR"
 if [[ $# -ge 1 && ! "$1" == "--"* ]]; then
     checkpoint_path=$1

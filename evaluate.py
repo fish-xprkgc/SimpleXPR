@@ -383,7 +383,7 @@ def evaluate_task(graph_structure):
         paths = query_dict[relation]
         hr_str = []
         for node in paths:
-            hr_str.append(process_path(node['query'], 1)[0])
+            hr_str.append(process_path(node['query'], 1,task_type='task_type_hr')[0])
         hr_tensor = merge_batches(hr_str)
         hr_tensor = move_dict_cuda(hr_tensor, device)
         with torch.no_grad():
@@ -413,7 +413,7 @@ def evaluate_task(graph_structure):
 
     with open('log_new/' + graph_structure + '_hr_result.json', 'w') as f:
         json.dump(query_dict, f, ensure_ascii=False, indent=4)
-
+    logger.info('hr data finish')
 if __name__ == "__main__":
     logger.info('start')
     logger.info('当前随机种子为'+str(args.seed))

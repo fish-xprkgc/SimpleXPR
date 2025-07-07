@@ -5,7 +5,7 @@ set -e
 
 TASK="WN18RR"
 DATA_DIR="data/${TASK}/"
-CHECKPOINT_DIR="checkpoint/${TASK}_new"
+CHECKPOINT_DIR="checkpoint/${TASK}_new_task_extra"
 LOG_DIR=${CHECKPOINT_DIR}
 
 python3 -u trainer.py \

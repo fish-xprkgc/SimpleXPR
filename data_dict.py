@@ -32,6 +32,11 @@ def data_prepare(data_dir):
             relation_dict[i] = i
             relation_dict[inverse + i] = inverse + i
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    token_dict['task_type_path']=tokenizer('Recommend the next relation and entity of the path based on query and current path, ',return_tensors='pt', padding=True, truncation=True, max_length=50)
+    token_dict['task_type_hr'] = tokenizer(
+        'Find the tail entity based on the query and start of path, ', return_tensors='pt',
+        padding=True, truncation=True, max_length=50)
+
     token_dict['query_flag'] = tokenizer('query: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
     token_dict['path_flag'] = tokenizer(',path: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
     token_dict['connect_flag'] = tokenizer('>', return_tensors='pt', padding=True, truncation=True, max_length=50)
@@ -59,29 +64,20 @@ def path_generator(data_dir, path_name, max_hop_path):
         for line in lines:
             line = line.strip().split('\t')
             hop_nums = int(len(line) / 2 - 1)
-            if line[0] != line[2] and hop_nums == 1:
-                temp_line = line[0:2]
-                temp_line.append(line[0])
-                temp_line.append(line[-1])
-                total_path[0].append(temp_line)
             if hop_nums == 1 and line[0] == line[2]:
-                hop_nums = 0
-            if hop_nums > 1:
-                for k in range(1, hop_nums):
-                    total_path[k].append(line[0:2 * k + 2])
+                total_path[0].append(line)
+            else:
                 temp_line = line[0:2]
                 temp_line.append(line[0])
                 temp_line.append(line[-1])
                 total_path[0].append(temp_line)
-            total_path[hop_nums].append(line)
-            if hop_nums == 0:
-                total_path[2].append(line)
-            else:
-                total_path[hop_nums + 1].append(line)
+                for k in range(1, hop_nums + 1):
+                    total_path[k].append(line[0:2 * k + 2])
+                total_path[hop_nums+1].append(line)
     return total_path
 
 
-def process_path(path_arr, query_hop=1):
+def process_path(path_arr, query_hop=1,task_type='task_type_path'):
     path_arr = [token_dict[i] for i in path_arr]
     path_head = path_arr[0:query_hop * 2]
     if len(path_arr) == query_hop * 2:
@@ -91,8 +87,9 @@ def process_path(path_arr, query_hop=1):
                      path_arr[query_hop * 2 + 1]]
     if query_hop == 0:
         return None, merge_path(path_tail)
-    query = [token_dict['query_flag'], path_head[0], token_dict['path_flag']]
+    query = [token_dict[task_type],token_dict['query_flag'], path_head[0], token_dict['path_flag']]
     for i in range(1, query_hop * 2):
+        query.append(token_dict['connect_flag'])
         query.append(path_head[i])
     head, tail = merge_path(query), merge_path(path_tail)
     return head, tail
