@@ -14,6 +14,7 @@ from collections import defaultdict
 relation_dict = {}
 token_dict = {}
 path_dict = {}
+path_next_dict = {}
 next_dict = defaultdict(lambda: defaultdict(set))
 combined_dict = {}
 
@@ -54,8 +55,13 @@ def data_prepare(data_dir):
 def path_prepare(data_dir, max_hop_path=5):
     global path_dict
     path_dict['train'] = path_generator(data_dir, 'train_path.txt', max_hop_path)
+    #generate_path_next(path_dict['train'])
     path_dict['valid'] = path_generator(data_dir, 'valid_path.txt', max_hop_path)
 
+def generate_path_next(paths):
+    global path_next_dict
+    for path_hop in paths:
+        pass
 
 def path_generator(data_dir, path_name, max_hop_path):
     total_path = [[] for i in range(max_hop_path + 3)]

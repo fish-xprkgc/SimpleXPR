@@ -97,7 +97,7 @@ class KHopDataset(Dataset):
         self.data_by_k = defaultdict(list)
 
         # 原始分组存储（保持采样器所需结构）
-        for hop in range(max_hop_path + 2):
+        for hop in range(max_hop_path + 3):
             self.data_by_k[hop] = total_path[hop]
         self.data_by_k = dict(self.data_by_k)
 

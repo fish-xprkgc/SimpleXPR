@@ -95,7 +95,7 @@ def evaluate_task(graph_structure):
 
     ema_decay = args.ema_decay
     query_dict = copy.deepcopy(result_dict)
-    for hop in range(args.max_hop_path + 1):
+    for hop in range(args.max_hop_path + 2):
         logger.info(str(hop) + ' hop data start')
         batch_limit = int(args.batch_size // (hop + 1))
         current_path_index = 0
