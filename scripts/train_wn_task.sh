@@ -14,7 +14,6 @@ python3 -u trainer.py \
 --model-path /mnt/data/sushiyuan/SimKGC/yhy/model/bert-base-uncased \
 --save-dir "${CHECKPOINT_DIR}" \
 --log-dir "${LOG_DIR}" \
---model-path bert-base-uncased \
 --pooling mean \
 --lr 5e-5 \
 --batch-size 1024 \
