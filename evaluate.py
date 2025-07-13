@@ -132,7 +132,6 @@ def evaluate_task(graph_structure):
                             node_path_shuffle = []
                             for i in range(len(node['path_flag'])):
                                 if node['path_flag'][i]:
-
                                     current_embedding = embeddings[node['path_dict'][i]]
                                     node_path = node['path'][i]
                                     tail_entity = node_path[-1]
@@ -205,6 +204,8 @@ def evaluate_task(graph_structure):
                                 node['path'] = []
                                 node['path_logit'] = []
                                 node['path_flag'] = []
+                                if args.only_tail:
+                                    current_tail=[]
                                 for node_info in new_continue_path:
                                     if len(node['path']) >= args.k_path:
                                         break
@@ -213,6 +214,11 @@ def evaluate_task(graph_structure):
                                     last_entity = new_path[-1]
                                     if last_entity in node_info[3]:
                                         continue
+                                    if args.only_tail:
+                                        if last_entity in current_tail:
+                                            continue
+                                        else:
+                                            current_tail.append(last_entity)
                                     node['path'].append(new_path)
                                     node['path_logit'].append(node_info[0])
                                     node['path_flag'].append(True)
@@ -238,7 +244,6 @@ def evaluate_task(graph_structure):
                     current_path_index = 0
                     current_path = []
         if current_path != []:
-
             current_path = [process_path(mini_path, hop + 1)[0] for mini_path in current_path]
             path_tensor = merge_batches(current_path)
             path_tensor = move_dict_cuda(path_tensor, device)
@@ -327,6 +332,8 @@ def evaluate_task(graph_structure):
                         node['path'] = []
                         node['path_logit'] = []
                         node['path_flag'] = []
+                        if args.only_tail:
+                            current_tail = []
                         for node_info in new_continue_path:
                             if len(node['path']) >= args.k_path:
                                 break
@@ -335,6 +342,11 @@ def evaluate_task(graph_structure):
                             last_entity = new_path[-1]
                             if last_entity in node_info[3]:
                                 continue
+                            if args.only_tail:
+                                if last_entity in current_tail:
+                                    continue
+                                else:
+                                    current_tail.append(last_entity)
                             node['path'].append(new_path)
                             node['path_logit'].append(node_info[0])
                             node['path_flag'].append(True)
@@ -360,7 +372,7 @@ def evaluate_task(graph_structure):
         items = new_data_copy[relation]
         for item in items:
             del item['mask'], item['path_dict']
-    with open('log_new/'+args.task +'_'+ graph_structure + '_path_result.json', 'w') as f:
+    with open('log_new/'+args.task +'_path_result.json', 'w') as f:
         json.dump(new_data_copy, f, ensure_ascii=False, indent=4)
     logger.info('hop data finish')
     gm = get_graph_manager()
@@ -411,7 +423,7 @@ def evaluate_task(graph_structure):
 
 
 
-    with open('log_new/' + graph_structure + '_hr_result.json', 'w') as f:
+    with open('log_new/'  +args.task+ '_hr_result.json', 'w') as f:
         json.dump(query_dict, f, ensure_ascii=False, indent=4)
     logger.info('hr data finish')
 if __name__ == "__main__":

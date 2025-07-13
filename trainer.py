@@ -31,8 +31,14 @@ def train_dp(max_hop_path: int, num_epochs=3):
         if k == 0:
             batch_sizes[k] = int(args.batch_size)
         else:
-            batch_sizes[k] = int(args.batch_size // (0.5 + k / 2))
-
+            if args.only_tail:
+                mini_len = k
+                if k > 1:
+                    mini_len = 2
+                batch_sizes[k] = int(args.batch_size // (0.5 + mini_len / 2))
+            else:
+                batch_sizes[k] = int(args.batch_size // (0.5 + k / 2))
+    print(batch_sizes)
     # 3. 创建数据加载器
     train_sampler = KHopBatchSampler(train_dataset, batch_sizes)
     train_dataloader = DataLoader(
@@ -177,7 +183,7 @@ def get_logits_labels(batch, model, model_obj, device):
         k = 1
         task_type = 'task_type_hr'
     for path in paths:
-        q, t = process_path(path, k,task_type)
+        q, t = process_path(path, k, task_type)
         query.append(q)
         tail.append(t)
     query_tensor = merge_batches(query)
@@ -188,7 +194,7 @@ def get_logits_labels(batch, model, model_obj, device):
     query_embedding = model(**query_tensor)
     tail_embedding = model(**tail_tensor)
 
-    mask = create_matrix_optimized(paths, k).to(device)
+    mask = create_matrix_optimized(paths, k, task_type).to(device)
     logits, labels = model_obj.compute_logits(query_embedding, tail_embedding, mask)
     return logits, labels
 

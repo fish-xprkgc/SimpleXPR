@@ -9,6 +9,7 @@ import torch
 from transformers import BatchEncoding, AutoTokenizer
 from typing import List, Dict, Any
 import numpy as np
+from logger_config import logger
 from collections import defaultdict
 
 relation_dict = {}
@@ -33,15 +34,27 @@ def data_prepare(data_dir):
             relation_dict[i] = i
             relation_dict[inverse + i] = inverse + i
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
-    token_dict['task_type_path']=tokenizer('Recommend the next relation and entity of the path based on query and current path, ',return_tensors='pt', padding=True, truncation=True, max_length=50)
-    token_dict['task_type_hr'] = tokenizer(
-        'Find the tail entity based on the query and start of path, ', return_tensors='pt',
-        padding=True, truncation=True, max_length=50)
+    if args.add_task_type:
+        token_dict['task_type_path'] = tokenizer(
+            'Recommend the next relation and entity of the path based on query and current path, ', return_tensors='pt',
+            padding=True, truncation=True, max_length=50)
+        token_dict['task_type_hr'] = tokenizer(
+            'Find the tail entity based on the query and start of path, ', return_tensors='pt',
+            padding=True, truncation=True, max_length=50)
+    else:
+        token_dict['task_type_path'] = tokenizer(
+            '', return_tensors='pt',
+            padding=True, truncation=True, max_length=50)
+        token_dict['task_type_hr'] = tokenizer(
+            '', return_tensors='pt',
+            padding=True, truncation=True, max_length=50)
 
     token_dict['query_flag'] = tokenizer('query: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
     token_dict['path_flag'] = tokenizer(',path: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
     token_dict['connect_flag'] = tokenizer('>', return_tensors='pt', padding=True, truncation=True, max_length=50)
     token_dict['end_flag'] = tokenizer('end of path', return_tensors='pt', padding=True, truncation=True, max_length=50)
+    if args.only_tail:
+        token_dict['skip_flag'] = tokenizer('...', return_tensors='pt', padding=True, truncation=True, max_length=50)
     for key in relation_dict:
         token_dict[key] = tokenizer(relation_dict[key], return_tensors='pt', padding=True, truncation=True,
                                     max_length=50)
@@ -55,13 +68,30 @@ def data_prepare(data_dir):
 def path_prepare(data_dir, max_hop_path=5):
     global path_dict
     path_dict['train'] = path_generator(data_dir, 'train_path.txt', max_hop_path)
-    #generate_path_next(path_dict['train'])
+    generate_path_next(path_dict['train'])
     path_dict['valid'] = path_generator(data_dir, 'valid_path.txt', max_hop_path)
+
 
 def generate_path_next(paths):
     global path_next_dict
-    for path_hop in paths:
-        pass
+    for path_hop, hop_paths in enumerate(paths):
+        task_type = 'task_type_path'
+        query_len = 2 * path_hop
+        if path_hop == 0:
+            query_len = 2
+            task_type = 'task_type_hr'
+        for path in hop_paths:
+            if args.only_tail:
+                query_path = task_type + ','.join(path[0:2]) + path[query_len - 1]
+            else:
+                query_path = task_type + ','.join(path[0:query_len])
+            if query_path not in path_next_dict:
+                path_next_dict[query_path] = set()
+            if len(path) == query_len:
+                path_next_dict[query_path].add('eos')
+            else:
+                path_next_dict[query_path].add(','.join(path[query_len:query_len + 2]))
+
 
 def path_generator(data_dir, path_name, max_hop_path):
     total_path = [[] for i in range(max_hop_path + 3)]
@@ -79,11 +109,12 @@ def path_generator(data_dir, path_name, max_hop_path):
                 total_path[0].append(temp_line)
                 for k in range(1, hop_nums + 1):
                     total_path[k].append(line[0:2 * k + 2])
-                total_path[hop_nums+1].append(line)
+
+                total_path[hop_nums + 1].append(line)
     return total_path
 
 
-def process_path(path_arr, query_hop=1,task_type='task_type_path'):
+def process_path(path_arr, query_hop=1, task_type='task_type_path'):
     path_arr = [token_dict[i] for i in path_arr]
     path_head = path_arr[0:query_hop * 2]
     if len(path_arr) == query_hop * 2:
@@ -93,10 +124,15 @@ def process_path(path_arr, query_hop=1,task_type='task_type_path'):
                      path_arr[query_hop * 2 + 1]]
     if query_hop == 0:
         return None, merge_path(path_tail)
-    query = [token_dict[task_type],token_dict['query_flag'], path_head[0], token_dict['path_flag']]
-    for i in range(1, query_hop * 2):
-        query.append(token_dict['connect_flag'])
-        query.append(path_head[i])
+    query = [token_dict[task_type], token_dict['query_flag'], path_head[0], token_dict['path_flag'], path_head[1]]
+    if query_hop > 1:
+        if args.only_tail:
+            query.extend([path_head[1], token_dict['connect_flag'], token_dict['skip_flag']
+                             ,token_dict['connect_flag'],path_head[-1]])
+        else:
+            for i in range(2, query_hop * 2):
+                query.append(token_dict['connect_flag'])
+                query.append(path_head[i])
     head, tail = merge_path(query), merge_path(path_tail)
     return head, tail
 
@@ -171,36 +207,42 @@ def merge_batches(batches):
     return BatchEncoding(merged)
 
 
-def create_matrix_optimized(paths, k):
+def create_matrix_optimized(paths, k, task_type='task_type_path'):
     k = max(k, 1)
     n = len(paths)
 
     # Step 1: 构建 lst
     lst = []
+    query = []
     target_len = 2 * k
     for path in paths:
+        if args.only_tail:
+            query_path = task_type + ','.join(path[0:2]) + path[target_len - 1]
+        else:
+            query_path = task_type + ','.join(path[0:target_len])
+        query.append(query_path)
         if len(path) == target_len:
             lst.append('eos')
         else:
-            lst.append(path[2 * k] + path[2 * k + 1])
-
-    # Step 2: 构建 value -> indices 映射
-
-    value_to_indices = defaultdict(list)
-    for idx, val in enumerate(lst):
-        value_to_indices[val].append(idx)
+            lst.append(','.join(path[target_len: target_len + 2]))
 
     # Step 3: 初始化矩阵
     matrix = np.ones((n, n), dtype=int)
-
-    # Step 4: 批量设置匹配项为 0
-    for indices in value_to_indices.values():
-        if len(indices) > 1:
-            matrix[np.ix_(indices, indices)] = 0
-
-    # Step 5: 设置对角线为 1
-    np.fill_diagonal(matrix, 1)
-
+    for i in range(n):
+        try:
+            temp_tail_set = path_next_dict[query[i]].copy()
+            temp_tail_set.add(lst[i])
+        except:
+            temp_tail_set = set()
+            temp_tail_set.add(lst[i])
+        for j in range(n):
+            if i == j:
+                matrix[i, j] = 1
+            else:
+                if lst[j] in temp_tail_set:
+                    matrix[i, j] = 0
+                else:
+                    matrix[i, j] = 1
     return torch.tensor(matrix, dtype=torch.bool)
 
 
@@ -211,17 +253,17 @@ def create_node_mask(node_id):
 def construct_next_dict(data_dir):
     with open(data_dir + 'train.txt', 'r') as f:
         for line in f:
-            process_line_dict(line,flag='train')
+            process_line_dict(line, flag='train')
     with open(data_dir + 'valid.txt', 'r') as f:
         for line in f:
-            process_line_dict(line,flag='valid')
+            process_line_dict(line, flag='valid')
     with open(data_dir + 'test.txt', 'r') as f:
         for line in f:
-            process_line_dict(line,flag='test')
+            process_line_dict(line, flag='test')
     return next_dict
 
 
-def process_line_dict(line,flag='train'):
+def process_line_dict(line, flag='train'):
     global next_dict
     line = line.strip().split('\t')
     if len(line) < 3:
