@@ -1,3 +1,5 @@
+import copy
+
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader, Sampler
@@ -5,6 +7,7 @@ import random
 import numpy as np
 from collections import defaultdict
 from typing import Dict, List, Any
+from utils import print_trainable_parameters
 import math
 import time
 
@@ -13,24 +16,55 @@ from transformers import AutoModel
 from config import args
 from numpy.random import Generator, PCG64
 
+from peft import LoraConfig, get_peft_model
+
 
 class PathModel(nn.Module):
-    """
-    示例模型，处理多跳路径数据
-    """
-
-    def __init__(self, model_name):
+    def __init__(self, model_name, use_lora=False, lora_rank=8, lora_alpha=16):
         super(PathModel, self).__init__()
-        self.path_model = AutoModel.from_pretrained(model_name)
+        self.use_lora = use_lora
+
+        # 加载原始模型
+        base_model = AutoModel.from_pretrained(model_name)
+        # 如果启用 LoRA，则插入适配层
+        #modules = ["query", "value"]
+        modules = ["q_proj", "v_proj"]
+        #modules=["q_proj", "v_proj","gate_proj", "up_proj", "down_proj"]
+        if use_lora:
+            lora_config = LoraConfig(
+                r=lora_rank,
+                lora_alpha=lora_alpha,
+                target_modules=modules,  # 根据模型类型调整
+                lora_dropout=0.1,
+                bias="none",
+                task_type="FEATURE_EXTRACTION"  # 根据任务类型调整
+            )
+            self.path_model = get_peft_model(base_model, lora_config)
+
+        else:
+            self.path_model = base_model
+        #self.path_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        #self.path_model.config.use_cache = False
+        if args.tail_token:
+            self.tail_model = copy.deepcopy(self.path_model)
         self.criterion = nn.CrossEntropyLoss()
 
-    def forward(self, input_ids, attention_mask, token_type_ids):
-        # paths: 批量的路径索引
-        # lengths: 每条路径的实际长度（用于pack_padded_sequence）
-        outputs = self.path_model(input_ids=input_ids,
-                                  attention_mask=attention_mask,
-                                  token_type_ids=token_type_ids,
-                                  return_dict=True)
+    def forward(self, input_ids, attention_mask, token_type_ids=None, query=True, **kwargs):
+        # 如果 token_type_ids 不为 None，则传入模型；否则不传
+        model_inputs = {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'return_dict': True
+        }
+        if token_type_ids is not None:
+            model_inputs['token_type_ids'] = token_type_ids
+        if args.tail_token:
+            if query:
+                outputs = self.path_model(**model_inputs)
+            else:
+                outputs = self.tail_model(**model_inputs)
+        else:
+            outputs = self.path_model(**model_inputs)
 
         last_hidden_state = outputs.last_hidden_state
         cls_output = last_hidden_state[:, 0, :]
@@ -51,14 +85,18 @@ class PathModel(nn.Module):
         return logits, labels
 
     @classmethod
-    def load_from_checkpoint(cls, checkpoint_path, model_name, map_location=None):
+    def load_from_checkpoint(cls, checkpoint_path, model_name, use_lora=False, map_location=None):
         """
-        加载模型权重，兼容普通模型和DataParallel模型
+        从检查点加载模型权重，兼容：
+            - 普通完整模型权重（state_dict）
+            - LoRA 适配器权重（lora_state_dict）
+            - DataParallel 多卡训练保存的 module.* 权重
 
         参数:
-            checkpoint_path (str): 权重文件路径
-            model_name (str): 传给AutoModel.from_pretrained的模型名称或路径
-            map_location (str or dict): 设备映射策略（如 'cpu'）
+            checkpoint_path (str): 检查点路径
+            model_name (str): 预训练模型名称或路径
+            use_lora (bool): 是否启用 LoRA（决定加载哪类权重）
+            map_location (str or dict): 设备映射策略
 
         返回:
             PathModel 实例
@@ -66,26 +104,40 @@ class PathModel(nn.Module):
         if map_location is None:
             map_location = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        # 实例化模型
-        model = cls(model_name=model_name)
+        # 实例化模型（根据 use_lora 决定是否插入 LoRA 层）
+        model = cls(model_name=model_name, use_lora=use_lora)
 
-        # 加载检查点
+        # 加载检查点文件
         checkpoint = torch.load(checkpoint_path, map_location=map_location)
 
-        # 提取 state_dict
-        state_dict = checkpoint.get('state_dict', checkpoint)  # 如果 checkpoint 中有 'state_dict' 就用它，否则整个就是 state_dict
+        # 提取 state_dict 和 lora_state_dict（如果存在）
+        state_dict = checkpoint.get('state_dict', None)
+        lora_state_dict = checkpoint.get('lora_state_dict', None)
 
-        # 处理 DataParallel 前缀
+        # 如果有 lora_state_dict，则优先使用它（只加载 LoRA 权重）
+        target_state_dict = lora_state_dict if lora_state_dict is not None else state_dict
+
+        if target_state_dict is None:
+            raise KeyError("Checkpoint 中未找到 state_dict 或 lora_state_dict")
+
+        # 去除 module. 前缀（兼容 DataParallel）
         new_state_dict = {}
-        for key, value in state_dict.items():
-            if key.startswith('module.'):
-                new_key = key.replace('module.', '')  # 去掉 module. 前缀
-            else:
-                new_key = key
+        for key, value in target_state_dict.items():
+            # 去掉 module. 前缀（如果存在）
+            new_key = key.replace('module.', '') if key.startswith('module.') else key
             new_state_dict[new_key] = value
 
-        # 加载权重（注意：这里只加载模型权重）
-        model.load_state_dict(new_state_dict, strict=True)
+        # 加载权重
+        missing_keys, unexpected_keys = model.load_state_dict(new_state_dict, strict=False)
+
+        # 打印缺失和多余的关键字（用于调试）
+        if missing_keys:
+            print("⚠️ 警告：以下键未被加载:")
+            print("\n".join(missing_keys))
+        if unexpected_keys:
+            print("⚠️ 警告：以下键未被模型接收:")
+            print("\n".join(unexpected_keys))
+
         return model
 
 
@@ -97,8 +149,12 @@ class KHopDataset(Dataset):
         self.data_by_k = defaultdict(list)
 
         # 原始分组存储（保持采样器所需结构）
-        for hop in range(max_hop_path + 3):
-            self.data_by_k[hop] = total_path[hop]
+        # 【主要修改点】将循环范围从固定的 max_hop_path 改为实际接收到的数据长度
+        for hop in range(len(total_path)):
+            # 增加一个判断，确保只添加非空的数据组
+            if total_path[hop]:
+                self.data_by_k[hop] = total_path[hop]
+
         self.data_by_k = dict(self.data_by_k)
 
         # 新增扁平化索引结构（用于兼容__getitem__）
@@ -247,6 +303,15 @@ def _pool_output(pooling: str,
         sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
         sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-4)
         output_vector = sum_embeddings / sum_mask
+    elif pooling == 'last':
+        left_padding = (mask[:, -1].sum() == mask.shape[0])
+        if left_padding:
+            output_vector = last_hidden_state[:, -1]
+        else:
+            sequence_lengths = mask.sum(dim=1) - 1
+            batch_size = last_hidden_state.shape[0]
+            output_vector = last_hidden_state[
+                torch.arange(batch_size, device=last_hidden_state.device), sequence_lengths]
     else:
         assert False, 'Unknown pooling mode: {}'.format(pooling)
     output_vector = nn.functional.normalize(output_vector, dim=1)

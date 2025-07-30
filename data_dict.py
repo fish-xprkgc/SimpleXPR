@@ -35,11 +35,12 @@ def data_prepare(data_dir):
             relation_dict[inverse + i] = inverse + i
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     if args.add_task_type:
+
         token_dict['task_type_path'] = tokenizer(
             'Recommend the next relation and entity of the path based on query and current path, ', return_tensors='pt',
             padding=True, truncation=True, max_length=50)
         token_dict['task_type_hr'] = tokenizer(
-            'Find the tail entity based on the query and start of path, ', return_tensors='pt',
+            'Find the tail entity based on the query and head entity, ', return_tensors='pt',
             padding=True, truncation=True, max_length=50)
     else:
         token_dict['task_type_path'] = tokenizer(
@@ -49,9 +50,11 @@ def data_prepare(data_dir):
             '', return_tensors='pt',
             padding=True, truncation=True, max_length=50)
 
-    token_dict['query_flag'] = tokenizer('query: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
-    token_dict['path_flag'] = tokenizer(',path: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
-    token_dict['connect_flag'] = tokenizer('>', return_tensors='pt', padding=True, truncation=True, max_length=50)
+    token_dict['query_flag'] = tokenizer(', query: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
+    token_dict['path_flag'] = tokenizer(', path: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
+    token_dict['connect_flag'] = tokenizer('->', return_tensors='pt', padding=True, truncation=True, max_length=50)
+    token_dict['head_entity'] = tokenizer(', head entity: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
+    token_dict['tail_entity'] = tokenizer('Tail entity: ', return_tensors='pt', padding=True, truncation=True, max_length=50)
     token_dict['end_flag'] = tokenizer('end of path', return_tensors='pt', padding=True, truncation=True, max_length=50)
     if args.only_tail:
         token_dict['skip_flag'] = tokenizer('...', return_tensors='pt', padding=True, truncation=True, max_length=50)
@@ -67,9 +70,14 @@ def data_prepare(data_dir):
 
 def path_prepare(data_dir, max_hop_path=5):
     global path_dict
-    path_dict['train'] = path_generator(data_dir, 'train_path.txt', max_hop_path)
+    if args.use_new_path:
+        path_dict['train'] = path_generator(data_dir, 'new_train_path.txt', max_hop_path)
+        path_dict['valid'] = path_generator(data_dir, 'new_valid_path.txt', max_hop_path)
+    else:
+        path_dict['train'] = path_generator(data_dir, 'train_path.txt', max_hop_path)
+        path_dict['valid'] = path_generator(data_dir, 'valid_path.txt', max_hop_path)
     generate_path_next(path_dict['train'])
-    path_dict['valid'] = path_generator(data_dir, 'valid_path.txt', max_hop_path)
+
 
 
 def generate_path_next(paths):
@@ -90,12 +98,47 @@ def generate_path_next(paths):
             if len(path) == query_len:
                 path_next_dict[query_path].add('eos')
             else:
-                path_next_dict[query_path].add(','.join(path[query_len:query_len + 2]))
+                if task_type == 'task_type_hr':
+                    path_next_dict[query_path].add(path[-1])
+                else:
+                    path_next_dict[query_path].add(','.join(path[query_len:query_len + 2]))
 
 
 def path_generator(data_dir, path_name, max_hop_path):
+    # 我们只修改 only_tail 模式下的逻辑
+    if args.only_tail:
+        total_path = [[], []]
+        with open(data_dir + path_name, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = line.strip().split('\t')
+                hop_nums = int(len(line) / 2 - 1)
+
+                if hop_nums == 1 and line[0] == line[2]:
+                    total_path[0].append(line)
+                else:
+                    # HR 任务样本保持不变
+                    temp_line = line[0:2]
+                    temp_line.append(line[0])
+                    temp_line.append(line[-1])
+                    total_path[0].append(temp_line)
+
+                    # 路径推理样本
+                    for k in range(1, hop_nums + 1):
+                        # 常规样本（路径前缀），长度为偶数
+                        total_path[1].append(line[0:2 * k + 2])
+
+                    # 【核心修改】
+                    # EOP样本（完整路径），我们为其添加 'eop' 标记
+                    eop_path = line.copy()  # 使用 .copy() 避免修改原始列表
+                    eop_path.append('eop')  # 添加标记，使其长度变为奇数
+                    total_path[1].append(eop_path)
+        return total_path
+
+    # 【保留】原始逻辑，当 only_tail=False 时执行
     total_path = [[] for i in range(max_hop_path + 3)]
     with open(data_dir + path_name, 'r') as f:
+        # ... 原始代码完全不变 ...
         lines = f.readlines()
         for line in lines:
             line = line.strip().split('\t')
@@ -109,26 +152,30 @@ def path_generator(data_dir, path_name, max_hop_path):
                 total_path[0].append(temp_line)
                 for k in range(1, hop_nums + 1):
                     total_path[k].append(line[0:2 * k + 2])
-
                 total_path[hop_nums + 1].append(line)
     return total_path
-
 
 def process_path(path_arr, query_hop=1, task_type='task_type_path'):
     path_arr = [token_dict[i] for i in path_arr]
     path_head = path_arr[0:query_hop * 2]
-    if len(path_arr) == query_hop * 2:
-        path_tail = [token_dict['connect_flag'], token_dict['end_flag']]
+    if task_type == 'task_type_path':
+        if len(path_arr) == query_hop * 2:
+            path_tail = [token_dict['connect_flag'], token_dict['end_flag']]
+        else:
+            path_tail = [token_dict['connect_flag'], path_arr[query_hop * 2], token_dict['connect_flag'],
+                         path_arr[query_hop * 2 + 1]]
     else:
-        path_tail = [token_dict['connect_flag'], path_arr[query_hop * 2], token_dict['connect_flag'],
-                     path_arr[query_hop * 2 + 1]]
+        path_tail = [token_dict['tail_entity'],path_arr[-1]]
     if query_hop == 0:
         return None, merge_path(path_tail)
-    query = [token_dict[task_type], token_dict['query_flag'], path_head[0], token_dict['path_flag'], path_head[1]]
+    if task_type == 'task_type_hr':
+        query = [token_dict[task_type], token_dict['query_flag'], path_head[0], token_dict['head_entity'], path_head[1]]
+    else:
+        query = [token_dict[task_type], token_dict['query_flag'], path_head[0], token_dict['path_flag'], path_head[1]]
     if query_hop > 1:
         if args.only_tail:
-            query.extend([path_head[1], token_dict['connect_flag'], token_dict['skip_flag']
-                             ,token_dict['connect_flag'],path_head[-1]])
+            query.extend([token_dict['connect_flag'], token_dict['skip_flag']
+                             , token_dict['connect_flag'], path_head[-1]])
         else:
             for i in range(2, query_hop * 2):
                 query.append(token_dict['connect_flag'])
@@ -163,10 +210,18 @@ def merge_path(batches: List[dict[Any, Tensor]]) -> dict[Any, Tensor]:
                 if i == 0:
                     sliced = tensor[:, :-1]  # 第一个去掉尾部 [1, seq_len-1]
                 elif i == num_batches - 1:
-                    sliced = tensor[:, 1:]  # 最后去掉头部 [1, seq_len-1]
+                    if args.qwen_token:
+                        sliced = tensor[:, 0:]
+                    else:
+                        sliced = tensor[:, 1:]  # 最后去掉头部 [1, seq_len-1]
                 else:
-                    sliced = tensor[:, 1:-1]  # 中间去头尾 [1, seq_len-2]
-
+                    if args.qwen_token:
+                        sliced = tensor[:, :-1]
+                    else:
+                        sliced = tensor[:, 1:-1]  # 中间去头尾 [1, seq_len-2]
+            if key == 'token_type_ids' and args.token_type_use:
+                group_id = i // 2 % 2
+                sliced[:] = group_id
             combined_sequence.append(sliced)
         # 核心修改：沿序列维度拼接（dim=1）
         merged[key] = torch.cat(combined_sequence, dim=1)  # 结果形状 [1, total_sliced_len]

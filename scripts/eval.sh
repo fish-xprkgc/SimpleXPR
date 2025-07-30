@@ -3,7 +3,7 @@
 set -x
 set -e
 
-checkpoint_path="./checkpoint/WN18RR_task_llm_skip/model_best.mdl"
+checkpoint_path="./checkpoint/WN18RR_path_lr_cls/model_best.mdl"
 TASK="WN18RR"
 if [[ $# -ge 1 && ! "$1" == "--"* ]]; then
     checkpoint_path=$1
@@ -23,7 +23,7 @@ python3 -u evaluate.py \
 --k-path 10 \
 --eval-mode 2 \
 --add-task-type \
---use-llm-relation \
---only-tail \
+--token-type-use \
+--pooling cls \
 --model-path /mnt/data/sushiyuan/SimKGC/yhy/model/bert-base-uncased "$@"
 

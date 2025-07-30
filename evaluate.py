@@ -1,6 +1,7 @@
 import copy
 import json
 import logging
+import math
 
 import numpy as np
 import torch
@@ -71,7 +72,7 @@ def evaluate_task(graph_structure):
 
     result_dict = construct_result_dict(all_data_dict)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = PathModel.load_from_checkpoint(args.eval_model_path, args.model_path).to(device)
+    model = PathModel.load_from_checkpoint(args.eval_model_path, args.model_path, use_lora=args.lora).to(device)
     model_obj = model
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs with DataParallel!")
@@ -85,7 +86,7 @@ def evaluate_task(graph_structure):
         batch_data = merge_batches(batch_list).to(device)
         # 构造 batch input_ids 和 attention_mask
         with torch.no_grad():
-            embeddings = model(**batch_data)
+            embeddings = model(**batch_data, query=False)
         all_embeddings.append(embeddings)
     del batch_data, embeddings
     torch.cuda.empty_cache()
@@ -95,7 +96,9 @@ def evaluate_task(graph_structure):
 
     ema_decay = args.ema_decay
     query_dict = copy.deepcopy(result_dict)
+
     for hop in range(args.max_hop_path + 2):
+
         logger.info(str(hop) + ' hop data start')
         batch_limit = int(args.batch_size // (hop + 1))
         current_path_index = 0
@@ -119,7 +122,7 @@ def evaluate_task(graph_structure):
                     path_tensor = merge_batches(current_path)
                     path_tensor = move_dict_cuda(path_tensor, device)
                     with torch.no_grad():
-                        embeddings = model(**path_tensor)
+                        embeddings = model(**path_tensor, query=True)
                     now_node_index = 0
                     for relation in result_dict:
                         paths = result_dict[relation]
@@ -152,7 +155,9 @@ def evaluate_task(graph_structure):
                                     if not isinstance(similarity, list):
                                         similarity = [similarity]
                                     for item_index in range(len(found_next)):
-                                        node_path_shuffle.append((ema_decay * similarity[item_index] + (1 - ema_decay) *
+                                        similarity[item_index] = max(similarity[item_index], 0.1)
+
+                                        node_path_shuffle.append((similarity[item_index] *
                                                                   node['path_logit'][i], found_next[item_index],
                                                                   node['path'][i], path_exist))
                             if args.eval_mode == 1:
@@ -204,8 +209,8 @@ def evaluate_task(graph_structure):
                                 node['path'] = []
                                 node['path_logit'] = []
                                 node['path_flag'] = []
-                                if args.only_tail:
-                                    current_tail=[]
+
+                                current_tail=[]
                                 for node_info in new_continue_path:
                                     if len(node['path']) >= args.k_path:
                                         break
@@ -214,11 +219,11 @@ def evaluate_task(graph_structure):
                                     last_entity = new_path[-1]
                                     if last_entity in node_info[3]:
                                         continue
-                                    if args.only_tail:
-                                        if last_entity in current_tail:
-                                            continue
-                                        else:
-                                            current_tail.append(last_entity)
+
+                                    if last_entity in current_tail:
+                                        continue
+                                    else:
+                                        current_tail.append(last_entity)
                                     node['path'].append(new_path)
                                     node['path_logit'].append(node_info[0])
                                     node['path_flag'].append(True)
@@ -248,7 +253,7 @@ def evaluate_task(graph_structure):
             path_tensor = merge_batches(current_path)
             path_tensor = move_dict_cuda(path_tensor, device)
             with torch.no_grad():
-                embeddings = model(**path_tensor)
+                embeddings = model(**path_tensor, query=True)
             now_node_index = 0
             for relation in result_dict:
                 paths = result_dict[relation]
@@ -280,7 +285,9 @@ def evaluate_task(graph_structure):
                             if not isinstance(similarity, list):
                                 similarity = [similarity]
                             for item_index in range(len(found_next)):
-                                node_path_shuffle.append((ema_decay * similarity[item_index] + (1 - ema_decay) *
+                                similarity[item_index]=max(similarity[item_index],0.1)
+
+                                node_path_shuffle.append((similarity[item_index] *
                                                           node['path_logit'][i], found_next[item_index],
                                                           node['path'][i], path_exist))
                     if args.eval_mode == 1:
@@ -332,8 +339,8 @@ def evaluate_task(graph_structure):
                         node['path'] = []
                         node['path_logit'] = []
                         node['path_flag'] = []
-                        if args.only_tail:
-                            current_tail = []
+
+                        current_tail = []
                         for node_info in new_continue_path:
                             if len(node['path']) >= args.k_path:
                                 break
@@ -342,11 +349,11 @@ def evaluate_task(graph_structure):
                             last_entity = new_path[-1]
                             if last_entity in node_info[3]:
                                 continue
-                            if args.only_tail:
-                                if last_entity in current_tail:
-                                    continue
-                                else:
-                                    current_tail.append(last_entity)
+
+                            if last_entity in current_tail:
+                                continue
+                            else:
+                                current_tail.append(last_entity)
                             node['path'].append(new_path)
                             node['path_logit'].append(node_info[0])
                             node['path_flag'].append(True)
@@ -372,63 +379,70 @@ def evaluate_task(graph_structure):
         items = new_data_copy[relation]
         for item in items:
             del item['mask'], item['path_dict']
-    with open('log_new/'+args.task +'_path_result.json', 'w') as f:
+    with open('log_new/' + args.task + '_path_result.json', 'w') as f:
         json.dump(new_data_copy, f, ensure_ascii=False, indent=4)
     logger.info('hop data finish')
     gm = get_graph_manager()
     node_ids = gm.get_all_entities()
+    tail_tokens = [process_path([i], query_hop=0,task_type='task_type_hr')[1] for i in node_ids]
+    all_embeddings = []
 
-    for relation in query_dict:
-        relation_tail = [process_path([relation, i], query_hop=0)[1] for i in node_ids]
-        all_embeddings = []
-
-        for i in range(0, len(relation_tail), args.batch_size):
-            batch_list = relation_tail[i:i + args.batch_size]
-            batch_data = merge_batches(batch_list).to(device)
-            # 构造 batch input_ids 和 attention_mask
-            with torch.no_grad():
-                embeddings = model(**batch_data)
-            all_embeddings.append(embeddings)
-        del batch_data, embeddings
-        torch.cuda.empty_cache()
-        all_tail_embeddings = torch.cat(all_embeddings, dim=0)
-        paths = query_dict[relation]
-        hr_str = []
-        for node in paths:
-            hr_str.append(process_path(node['query'], 1,task_type='task_type_hr')[0])
-        hr_tensor = merge_batches(hr_str)
-        hr_tensor = move_dict_cuda(hr_tensor, device)
+    for i in range(0, len(tail_tokens), args.batch_size):
+        batch_list = tail_tokens[i:i + args.batch_size]
+        batch_data = merge_batches(batch_list).to(device)
+        # 构造 batch input_ids 和 attention_mask
         with torch.no_grad():
-            embeddings = model(**hr_tensor)
-        similarity = torch.matmul(embeddings, all_tail_embeddings.t())
-        current_index = 0
-        for node in paths:
-            current_result = similarity[current_index]
-            node['mask'].append(node['query'][1])
-            for mask_str in node['mask']:
+            embeddings = model(**batch_data, query=False)
+        all_embeddings.append(embeddings)
+    del batch_data, embeddings
+    torch.cuda.empty_cache()
+    all_tail_embeddings = torch.cat(all_embeddings, dim=0)
+    buffer = []  # (relation_key, node, hr_tensor, mask_info) 四元组
+
+    for relation, paths in query_dict.items():
+        hr_str = [process_path(p['query'], 1, task_type='task_type_hr')[0] for p in paths]
+        for node, single_hr in zip(paths, hr_str):
+            buffer.append((relation, node, single_hr, node['mask'] + [node['query'][1]]))
+    batch_size=args.batch_size
+    # 按 batch 切分
+    num_batches = math.ceil(len(buffer) / batch_size)
+
+    for b in range(num_batches):
+        start, end = b * batch_size, (b + 1) * batch_size
+        batch = buffer[start:end]
+
+        # 把当前 batch 里的 hr_tensor 重新拼成一个整体
+        batch_hr = merge_batches([item[2] for item in batch])
+        batch_hr = move_dict_cuda(batch_hr, device)
+
+        with torch.no_grad():
+            embeddings = model(**batch_hr, query=True)  # [batch_size, dim]
+        similarity = torch.matmul(embeddings, all_tail_embeddings.t())  # [batch_size, num_entities]
+
+        for i, (rel_key, node, _, mask_list) in enumerate(batch):
+            current_result = similarity[i].clone()  # 避免 in-place 修改
+            for mask_str in mask_list:
                 mask_id = node_ids.index(mask_str)
                 current_result[mask_id] = -1e4
 
             topk_values, topk_indices = torch.topk(current_result, k=10)
 
-            node['hr_tail'] = []
-            node['hr_logit'] = []
+            node['hr_tail'] = [node_ids[idx] for idx in topk_indices.tolist()]
+            node['hr_logit'] = topk_values.tolist()
 
-            # 直接使用索引获取结果，避免排序整个列表
-            for value, idx in zip(topk_values.tolist(), topk_indices.tolist()):
-                node['hr_tail'].append(node_ids[idx])
-                node['hr_logit'].append(value)
-            del node['mask']
-            current_index = current_index + 1
+            # 清理不再需要的字段
+            if 'mask' in node:
+                del node['mask']
 
-
-
-    with open('log_new/'  +args.task+ '_hr_result.json', 'w') as f:
+    # 写结果
+    with open('log_new/' + args.task + '_hr_result.json', 'w', encoding='utf-8') as f:
         json.dump(query_dict, f, ensure_ascii=False, indent=4)
     logger.info('hr data finish')
+
+
 if __name__ == "__main__":
     logger.info('start')
-    logger.info('当前随机种子为'+str(args.seed))
+    logger.info('当前随机种子为' + str(args.seed))
     data_prepare(args.data_dir)
     for i in ['train']:
         evaluate_task(i)

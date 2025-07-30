@@ -31,7 +31,7 @@ parser.add_argument('--use-llm-relation', action='store_true',
 parser.add_argument('--model-path', default="/mnt/data/sushiyuan/SimKGC/yhy/model/bert-base-uncased", type=str, metavar='N',
                     help='path to data dir')
 parser.add_argument('--max-hop-path', default=5, type=int, metavar='N',
-                    help='max hop paths')
+                    help='max hop paths, this means how many nodes except head and entity in the path')
 parser.add_argument('--log-dir', default="./log", type=str, metavar='N',)
 parser.add_argument('--save-dir', default="./checkpoint", type=str, metavar='N',)
 parser.add_argument('--batch-size', default=1024, type=int, metavar='N',)
@@ -67,6 +67,18 @@ parser.add_argument('--only-tail', action='store_true',
                     help='only maintain tail entity of path')
 parser.add_argument('--add-task-type', action='store_true',
                     help='add task type description')
+parser.add_argument('--qwen-token', action='store_true',
+                    help='use qwen tokenizer')
+parser.add_argument('--lora', action='store_true',
+                    help='use lora')
+parser.add_argument('--tail-token', action='store_true',
+                    help='use 2 encoder')
+parser.add_argument('--token-type-use',action='store_true',
+                    help='use token type')
+parser.add_argument('--use-new-path',action='store_true',
+                    help='use new path file')
+parser.add_argument('--train-tail',action='store_true',
+                    help='only train tail part')
 args = parser.parse_args()
 set_seed(args.seed)
 

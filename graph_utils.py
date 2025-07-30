@@ -191,6 +191,84 @@ class GraphManager:
             vid = self.node_id_map[customid]
             self.graph.vs[vid]["description"] = new_description
 
+    def find_all_simple_paths(
+            self,
+            source_id: str,
+            target_id: str,
+            max_hops: int
+    ) -> List[List[Tuple]]:
+        """
+        基于igraph内置算法，高效查找两个节点间的所有简单路径。
+        """
+        try:
+            src_vid = self.node_id_map[source_id]
+            dst_vid = self.node_id_map[target_id]
+        except KeyError as e:
+            # 如果节点ID不存在于映射中，则返回空列表
+            # print(f"警告: 节点 {e} 不在图中。")
+            return []
+
+        # 调用 igraph 核心函数，这是性能的来源
+        # 注意：output='vpath' 是 get_all_simple_paths 的唯一输出选项
+        node_paths_indices = self.graph.get_all_simple_paths(
+            src_vid, to=dst_vid, cutoff=max_hops, mode='out'
+        )
+
+        if not node_paths_indices:
+            return []
+
+        # 将返回的【节点索引路径】转换为【边三元组路径】
+        all_edge_paths = []
+        for node_idx_path in node_paths_indices:
+            current_edge_path = []
+            for i in range(len(node_idx_path) - 1):
+                u_idx, v_idx = node_idx_path[i], node_idx_path[i + 1]
+                try:
+                    eid = self.graph.get_eid(u_idx, v_idx, directed=True, error=True)
+                    current_edge_path.append(self.edge_list[eid])
+                except ValueError:
+                    current_edge_path = []
+                    break
+
+            if current_edge_path:
+                all_edge_paths.append(current_edge_path)
+
+        return all_edge_paths
+
+    def find_paths_batch_cached(
+            self,
+            source_ids: List[str],
+            target_ids: List[str],
+            max_hops: int
+    ) -> Dict[Tuple[str, str], List[List[Tuple]]]:
+        """
+        支持批量和缓存的路径查找接口。
+        """
+        if len(source_ids) != len(target_ids):
+            raise ValueError("源ID列表和目标ID列表的长度必须相等。")
+
+        cache = {}
+        all_results = {}
+
+        for source_id, target_id in zip(source_ids, target_ids):
+            # 处理自环情况
+            if source_id == target_id:
+                all_results[(source_id, target_id)] = []
+                continue
+
+            query_pair = (source_id, target_id)
+
+            if query_pair in cache:
+                all_results[query_pair] = cache[query_pair]
+                continue
+
+            paths = self.find_all_simple_paths(source_id, target_id, max_hops)
+
+            all_results[query_pair] = paths
+            cache[query_pair] = paths
+
+        return all_results
+
 
 _gm_instance = None
 
